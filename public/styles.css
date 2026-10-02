@@ -196,6 +196,11 @@ input:focus { border-color: #ef503b94; box-shadow: 0 0 0 2px #ef503b18; }
 .latest-upload a { max-width: 100%; overflow: hidden; color: #d8d8dc; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .latest-upload a:hover { color: var(--accent-bright); text-decoration: underline; }
 .latest-upload-date { color: #777983; }
+.latest-delivery { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding-top: 9px; color: #91a99b; font-size: 10px; }
+.latest-delivery-label { color: #91d7ad; font: 9px "DM Mono", monospace; letter-spacing: .65px; }
+.latest-delivery a { max-width: 100%; overflow: hidden; color: #d8d8dc; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.latest-delivery a:hover { color: var(--accent-bright); text-decoration: underline; }
+.latest-delivery-detail { color: #8eaa98; }
 .add-channel { display: flex; width: 100%; align-items: center; gap: 12px; margin-top: 14px; padding: 14px 16px; border: 1px dashed #43454e; border-radius: 9px; background: #ffffff03; color: #d4d3d0; text-align: left; transition: border-color .15s, background .15s; }
 .add-channel:hover { border-color: #ef503b7a; background: #ef503b08; }
 .add-icon { display: grid; width: 31px; height: 31px; place-items: center; border-radius: 8px; background: #ef503b19; color: var(--accent-bright); font-size: 19px; }

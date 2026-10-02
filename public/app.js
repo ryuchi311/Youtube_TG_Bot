@@ -72,8 +72,10 @@ function updateHealth(channels, telegramConfigured) {
     const channel = channels.find((item) => item.id === id);
     const meta = card.querySelector(".channel-meta");
     const latestUpload = card.querySelector(".latest-upload");
+    const latestDelivery = card.querySelector(".latest-delivery");
     meta.classList.toggle("has-error", Boolean(channel?.lastError));
     latestUpload.replaceChildren();
+    latestDelivery.replaceChildren();
     if (!channel) {
       meta.textContent = "";
     } else if (channel.lastError) {
@@ -102,6 +104,42 @@ function updateHealth(channels, telegramConfigured) {
           latestUpload.append(published);
         }
       }
+    }
+    const deliveries = (channel?.destinations || [])
+      .filter((destination) =>
+        destination.lastNotifiedAt && destination.lastNotifiedVideoTitle)
+      .map((destination) => ({
+        ...destination,
+        notifiedAt: Date.parse(destination.lastNotifiedAt),
+      }))
+      .filter((destination) => Number.isFinite(destination.notifiedAt))
+      .sort((a, b) => b.notifiedAt - a.notifiedAt);
+    const latestDeliveryRecord = deliveries[0];
+    if (latestDeliveryRecord) {
+      const sameVideoDeliveries = deliveries.filter((destination) =>
+        latestDeliveryRecord.lastVideoId
+          ? destination.lastVideoId === latestDeliveryRecord.lastVideoId
+          : destination.lastNotifiedVideoTitle === latestDeliveryRecord.lastNotifiedVideoTitle);
+      const label = document.createElement("span");
+      label.className = "latest-delivery-label";
+      label.textContent = "LAST AUTO-POST";
+      const link = document.createElement("a");
+      link.href = `https://www.youtube.com/watch?v=${encodeURIComponent(latestDeliveryRecord.lastVideoId || "")}`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = latestDeliveryRecord.lastNotifiedVideoTitle;
+      const detail = document.createElement("span");
+      detail.className = "latest-delivery-detail";
+      detail.textContent = `Sent to ${sameVideoDeliveries.length}/${channel.destinations.length} destinations · ${new Date(latestDeliveryRecord.notifiedAt).toLocaleString()}`;
+      latestDelivery.append(label, link, detail);
+    } else if (channel) {
+      const label = document.createElement("span");
+      label.className = "latest-delivery-label";
+      label.textContent = "AUTO-POST";
+      const detail = document.createElement("span");
+      detail.className = "latest-delivery-detail";
+      detail.textContent = "No automatic post recorded yet.";
+      latestDelivery.append(label, detail);
     }
   }
 
