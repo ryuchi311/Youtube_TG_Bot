@@ -1,0 +1,4 @@
+/*
+  X-Content-Type-Options: nosniff
+  Content-Security-Policy: default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'
+  Referrer-Policy: same-origin

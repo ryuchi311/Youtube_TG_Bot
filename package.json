@@ -1,0 +1,18 @@
+{
+  "name": "youtube-telegram-notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A web dashboard for forwarding new YouTube uploads to Telegram groups and forum topics.",
+  "scripts": {
+    "start": "node server.js",
+    "cloudflare:dev": "wrangler d1 migrations apply tubesignal-db --local && wrangler dev",
+    "cloudflare:deploy": "node scripts/deploy-cloudflare.mjs",
+    "cloudflare:import": "node scripts/import-cloudflare-config.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "wrangler": "4.146.0"
+  }
+}

@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111318">
+    <title>TubeSignal — YouTube to Telegram</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="TubeSignal home">
+          <span class="brand-mark" aria-hidden="true">▶</span>
+          <span>tube<span class="brand-accent">signal</span></span>
+        </a>
+        <div class="topbar-right">
+          <span class="status-pill"><span class="status-dot"></span> LOCAL DASHBOARD</span>
+          <button class="button button-quiet hidden" id="logout-button" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-line"></span> YOUR CHANNELS, IN REAL TIME</p>
+          <h1>Never miss a<br><span>new upload.</span></h1>
+          <p class="hero-description">Send new YouTube videos straight to your Telegram groups — and exactly the topic you want.</p>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="orbit orbit-outer"></div>
+          <div class="orbit orbit-inner"></div>
+          <div class="play-tile"><span>▶</span></div>
+          <div class="orbit-ping ping-one"></div>
+          <div class="orbit-ping ping-two"></div>
+          <div class="orbit-ping ping-three"></div>
+        </div>
+      </section>
+
+      <section class="login-card card hidden" id="login-view">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">PRIVATE DASHBOARD</p>
+            <h2>Welcome back</h2>
+            <p class="muted">Enter your dashboard password to manage your notifications.</p>
+          </div>
+          <span class="heading-icon">⌑</span>
+        </div>
+        <form id="login-form">
+          <label class="field-label" for="password">Dashboard password</label>
+          <div class="input-with-icon">
+            <span aria-hidden="true">⌑</span>
+            <input id="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+          </div>
+          <button class="button button-primary button-wide" type="submit">Open dashboard <span>→</span></button>
+        </form>
+      </section>
+
+      <section class="dashboard hidden" id="dashboard-view">
+        <div class="dashboard-heading">
+          <div>
+            <p class="eyebrow">YOUR WORKSPACE</p>
+            <h2>Video notifications</h2>
+            <p class="muted">Set up your channels and Telegram groups once. We’ll take care of the rest.</p>
+          </div>
+          <button class="button button-secondary" id="check-button" type="button"><span class="refresh-icon">↻</span> Check now</button>
+        </div>
+
+        <div class="notice hidden" id="telegram-notice">
+          <span class="notice-icon">!</span>
+          <div><strong>Telegram bot token not configured</strong><p>Add <code>TELEGRAM_BOT_TOKEN</code> to your environment and restart the app to send notifications.</p></div>
+        </div>
+
+        <div class="monitor-status" id="monitor-status" role="status" aria-live="polite">
+          <span class="monitor-dot"></span>
+          <div><strong id="monitor-title">Loading status…</strong><p id="monitor-detail">Checking the latest monitor health.</p></div>
+        </div>
+        <div class="setup-overview" aria-label="Setup progress">
+          <a class="overview-card" href="#saved-channels">
+            <span class="overview-icon">▶</span>
+            <span class="overview-copy"><strong>YouTube channels</strong><small id="setup-channel-count">0 saved</small></span>
+            <span class="overview-state" id="setup-channel-state">Add</span>
+          </a>
+          <a class="overview-card" href="#saved-destinations">
+            <span class="overview-icon telegram-icon">✈</span>
+            <span class="overview-copy"><strong>Telegram destinations</strong><small id="setup-destination-count">0 saved</small></span>
+            <span class="overview-state" id="setup-destination-state">Add</span>
+          </a>
+          <a class="overview-card" href="#routes">
+            <span class="overview-icon route-icon">↗</span>
+            <span class="overview-copy"><strong>Notification routes</strong><small id="setup-route-count">0 active</small></span>
+            <span class="overview-state" id="setup-route-state">Set up</span>
+          </a>
+        </div>
+
+        <details class="settings-panel">
+          <summary><span><strong>Monitoring settings</strong><small>Check frequency and Telegram message format</small></span><span class="section-chevron" aria-hidden="true">⌄</span></summary>
+          <div class="settings-panel-content">
+            <div class="check-settings">
+              <label for="poll-interval">Check for new uploads</label>
+              <select id="poll-interval">
+                <option value="1">Every 1 minute</option>
+                <option value="2">Every 2 minutes</option>
+                <option value="5">Every 5 minutes</option>
+                <option value="10">Every 10 minutes</option>
+                <option value="15">Every 15 minutes</option>
+                <option value="30">Every 30 minutes</option>
+                <option value="60">Every 60 minutes</option>
+              </select>
+              <button class="button button-small" id="save-settings" type="button">Save settings</button>
+            </div>
+            <details class="message-template-settings">
+              <summary>Customize Telegram message <span class="section-chevron" aria-hidden="true">⌄</span></summary>
+              <div class="template-settings-content">
+                <label class="field-label" for="message-template">Message template</label>
+                <textarea id="message-template" rows="6" maxlength="900" spellcheck="false"></textarea>
+                <p class="template-help">Supports Telegram HTML and {title}, {channel}, {published}, {url}, {videoId}. Use your own group links or hashtags as plain text. New uploads are sent with the video thumbnail.</p>
+                <div class="template-actions">
+                  <button class="button button-small" id="reset-template" type="button">Use default</button>
+                  <button class="button button-secondary" id="save-template" type="button">Save message</button>
+                </div>
+              </div>
+            </details>
+          </div>
+        </details>
+
+        <nav class="workflow-nav" aria-label="Dashboard sections">
+          <a href="#saved-channels"><span class="nav-step">1</span><span class="nav-label">Add channels</span></a>
+          <a href="#saved-destinations"><span class="nav-step">2</span><span class="nav-label">Add Telegram groups</span></a>
+          <a href="#routes"><span class="nav-step">3</span><span class="nav-label">Connect &amp; save</span></a>
+        </nav>
+
+        <details class="workflow-section saved-library" id="saved-channels">
+          <summary class="workflow-section-heading">
+            <span class="step-number">01</span>
+            <div><h3>YouTube channels</h3><p>Add each channel once. Fetch details to verify its ID and name.</p></div>
+            <span class="saved-count" id="saved-channel-count">0 saved</span>
+            <span class="section-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="workflow-panel">
+            <div class="saved-channel-list" id="saved-channel-list"></div>
+            <button class="button button-small" id="add-saved-channel" type="button">+ Add a YouTube channel</button>
+            <div class="saved-save-row">
+              <span class="muted">Channel IDs start with UC. Save before creating a route.</span>
+              <button class="button button-secondary" id="save-channels" type="button">Save channels</button>
+            </div>
+          </div>
+        </details>
+
+        <details class="workflow-section saved-library" id="saved-destinations">
+          <summary class="workflow-section-heading">
+            <span class="step-number">02</span>
+            <div><h3>Telegram groups &amp; topics</h3><p>Add each group once. A topic ID is only needed for a specific forum topic.</p></div>
+            <span class="saved-count" id="saved-count">0 saved</span>
+            <span class="section-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="workflow-panel">
+            <div class="saved-destination-list" id="saved-destination-list"></div>
+            <button class="button button-small" id="add-saved-destination" type="button">+ Add a Telegram destination</button>
+            <div class="saved-save-row">
+              <span class="muted">Fetch details, then test the bot before saving.</span>
+              <button class="button button-secondary" id="save-destinations" type="button">Save destinations</button>
+            </div>
+          </div>
+        </details>
+
+        <details class="workflow-section routes-section" id="routes">
+          <summary class="workflow-section-heading">
+            <span class="step-number">03</span>
+            <div><h3>Connect channels to groups</h3><p>Choose one YouTube channel per route, then select every Telegram group or topic that should receive its uploads.</p></div>
+            <span class="saved-count" id="route-section-count">0 routes</span>
+            <span class="section-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="routes-panel">
+            <p class="route-empty-state" id="route-empty-state">No routes yet. Add a route to choose which channel posts to which groups.</p>
+            <div id="channel-list" class="channel-list"></div>
+
+            <button class="add-channel" id="add-channel" type="button">
+              <span class="add-icon">+</span>
+              <span><strong>Add a route</strong><small>Connect one YouTube channel to one or more Telegram destinations</small></span>
+              <span class="add-arrow">→</span>
+            </button>
+
+            <div class="save-row">
+              <div class="save-hint"><span class="save-dot"></span><span>Route changes are saved to this server.</span></div>
+              <button class="button button-primary" id="save-button" type="button">Save routes <span>→</span></button>
+            </div>
+          </div>
+        </details>
+        <p class="feedback hidden" id="feedback" role="status"></p>
+      </section>
+
+      <footer class="footer"><span>BUILT FOR YOUR COMMUNITY</span><span class="footer-dot">·</span><span>YOUTUBE → TELEGRAM</span><span class="footer-right" id="poll-summary">Checks every 2 minutes</span></footer>
+    </main>
+
+    <template id="channel-template">
+      <article class="channel-card card">
+        <div class="channel-top">
+          <div class="channel-identity">
+            <span class="channel-icon">▶</span>
+            <div class="channel-title-wrap"><span class="channel-name">YouTube channel</span><span class="channel-label">YOUTUBE CHANNEL</span></div>
+          </div>
+          <button class="icon-button remove-channel" type="button" aria-label="Remove channel" title="Remove channel">×</button>
+        </div>
+        <div class="channel-input-row">
+          <label class="field-label">Use saved channel</label>
+          <select class="saved-channel-select" aria-label="Choose a saved YouTube channel"></select>
+          <label class="field-label">Channel ID</label>
+          <input class="channel-id" type="text" placeholder="UCxxxxxxxxxxxxxxxxxxxxxx" spellcheck="false">
+          <span class="field-caption">Find the ID in YouTube Studio → Settings → Channel → Advanced settings.</span>
+        </div>
+        <p class="channel-duplicate-warning hidden" role="status">This channel already has a route. Add destinations to its existing route instead.</p>
+        <details class="route-destinations">
+          <summary class="destinations-heading">
+            <span class="destinations-copy"><strong>Telegram destinations</strong><span>Check every group or topic that should receive this channel’s uploads.</span></span>
+            <span class="selected-destination-count">0 selected</span>
+            <span class="section-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="destination-list"></div>
+        </details>
+        <div class="channel-meta"></div>
+        <div class="latest-upload"></div>
+      </article>
+    </template>
+
+    <template id="route-destination-template">
+      <div class="route-destination-option">
+        <label class="route-destination-label">
+          <input class="route-destination-checkbox" type="checkbox">
+          <span class="route-destination-name"></span>
+        </label>
+        <button class="icon-button test-route-destination" type="button" title="Send a test message" aria-label="Send a test message">↗</button>
+        <span class="route-destination-status" role="status"></span>
+      </div>
+    </template>
+
+    <template id="saved-destination-template">
+      <div class="saved-destination-row">
+        <input class="saved-name" type="text" placeholder="Name (e.g. Announcements)" aria-label="Destination name" maxlength="80">
+        <input class="saved-chat-id" type="text" placeholder="Group chat ID" aria-label="Telegram group chat ID" spellcheck="false">
+        <input class="saved-topic-id" type="text" placeholder="Topic ID (optional)" aria-label="Optional Telegram topic ID" inputmode="numeric">
+        <button class="button button-small fetch-telegram-details" type="button">Fetch details</button>
+        <button class="button button-small test-saved-destination" type="button">Test</button>
+        <button class="icon-button remove-saved-destination" type="button" title="Remove saved destination" aria-label="Remove saved destination">×</button>
+        <span class="saved-destination-status" role="status"></span>
+      </div>
+    </template>
+
+    <template id="saved-channel-template">
+      <div class="saved-channel-row">
+        <input class="saved-channel-name" type="text" placeholder="Name (e.g. My channel)" aria-label="Channel name" maxlength="80">
+        <input class="saved-channel-id" type="text" placeholder="YouTube channel ID (UC…)" aria-label="YouTube channel ID" spellcheck="false">
+        <button class="button button-small fetch-channel-details" type="button">Fetch details</button>
+        <button class="icon-button remove-saved-channel" type="button" title="Remove saved channel" aria-label="Remove saved channel">×</button>
+        <span class="saved-channel-status" role="status"></span>
+      </div>
+    </template>
+  </body>
+</html>
