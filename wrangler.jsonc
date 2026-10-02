@@ -1,5 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+<<<<<<< HEAD
+=======
+  // wrangler.jsonc
+>>>>>>> 4d18aab4a20ec439981fd4a9e4bd0204fa6e64de
   "name": "youtube-tg-bot",
   "main": "worker.js",
   "compatibility_date": "2026-10-01",
