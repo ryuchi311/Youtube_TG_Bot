@@ -15,7 +15,7 @@
       "binding": "DB",
       "database_name": "tubesignal-db",
       "migrations_dir": "migrations",
-      "database_id": "648dc543-fcb3-4d51-9993-e03e2943e2be"
+      "database_id": "9b2fe4d9-9384-43e5-865b-ba3e46a34482"
     }
   ],
   "triggers": {
