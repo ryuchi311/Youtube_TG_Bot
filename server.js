@@ -123,7 +123,47 @@ function checkOrigin(request) {
   }
 }
 
+function destinationPlatform(destination) {
+  return destination.platform ?? "telegram";
+}
+
+function destinationKey(destination) {
+  const platform = destinationPlatform(destination);
+  return platform === "discord"
+    ? `discord:${destination.webhookUrl}`
+    : `telegram:${destination.chatId}:${destination.topicId || ""}`;
+}
+
 function validateDestination(destination) {
+  if (!destination || typeof destination !== "object" || Array.isArray(destination)) {
+    throw new RequestError("Each notification destination must be an object.");
+  }
+  const platform = destinationPlatform(destination);
+  if (platform === "discord") {
+    const webhookUrl = typeof destination.webhookUrl === "string" ? destination.webhookUrl.trim() : "";
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(webhookUrl);
+    } catch {
+      throw new RequestError("Enter a valid Discord webhook URL.");
+    }
+    if (
+      parsedUrl.protocol !== "https:" ||
+      parsedUrl.hostname !== "discord.com" ||
+      parsedUrl.port ||
+      parsedUrl.username ||
+      parsedUrl.password ||
+      parsedUrl.search ||
+      parsedUrl.hash ||
+      !/^\/api\/webhooks\/\d+\/[A-Za-z0-9._-]+$/.test(parsedUrl.pathname)
+    ) {
+      throw new RequestError("Use a Discord webhook URL from discord.com.");
+    }
+    return { platform, webhookUrl: parsedUrl.toString() };
+  }
+  if (platform !== "telegram") {
+    throw new RequestError("Choose Telegram or Discord for each notification destination.");
+  }
   const chatId = typeof destination.chatId === "string" ? destination.chatId.trim() : "";
   const topicId = typeof destination.topicId === "string" ? destination.topicId.trim() : "";
   if (!/^(?:-?\d+|@[A-Za-z0-9_]{5,32})$/.test(chatId)) {
@@ -132,15 +172,14 @@ function validateDestination(destination) {
   if (topicId && !/^[1-9]\d*$/.test(topicId)) {
     throw new RequestError("Topic IDs must be positive numbers, or left blank.");
   }
-  return { chatId, topicId };
+  return { platform, chatId, topicId };
 }
 
 function latestRouteTestForDestination(destination) {
   return config.channels
     .flatMap((channel) => channel.destinations || [])
     .filter((item) =>
-      item.chatId === destination.chatId &&
-      item.topicId === destination.topicId &&
+      destinationKey(item) === destinationKey(destination) &&
       typeof item.lastTestAt === "string" &&
       Number.isFinite(Date.parse(item.lastTestAt)))
     .sort((left, right) => Date.parse(right.lastTestAt) - Date.parse(left.lastTestAt))[0] || null;
@@ -148,12 +187,15 @@ function latestRouteTestForDestination(destination) {
 
 function validateSavedDestinations(input) {
   if (!Array.isArray(input) || input.length > 100) {
-    throw new RequestError("Save up to 100 Telegram destinations.");
+    throw new RequestError("Save up to 100 notification destinations.");
   }
 
   const ids = new Set();
   const destinationKeys = new Set();
   return input.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new RequestError("Each saved destination must be an object.");
+    }
     const id = typeof item.id === "string" ? item.id.trim() : "";
     const name = typeof item.name === "string" ? item.name.trim() : "";
     if (!/^[a-f0-9-]{36}$/i.test(id)) throw new RequestError("Each saved destination needs a valid ID.");
@@ -161,16 +203,16 @@ function validateSavedDestinations(input) {
     ids.add(id);
     if (!name || name.length > 80) throw new RequestError("Each saved destination needs a name of 1 to 80 characters.");
     const destination = validateDestination(item);
-    const key = `${destination.chatId}:${destination.topicId}`;
+    const key = destinationKey(destination);
     if (destinationKeys.has(key)) {
-      throw new RequestError("A group/topic can only be saved once. Remove the duplicate saved destination.");
+      throw new RequestError("A destination can only be saved once. Remove the duplicate saved destination.");
     }
     destinationKeys.add(key);
     const existingById = config.savedDestinations.find((savedDestination) => savedDestination.id === id);
     const existingForDestination = config.savedDestinations.find((savedDestination) =>
-      savedDestination.chatId === destination.chatId && savedDestination.topicId === destination.topicId);
+      destinationKey(savedDestination) === key);
     const previousTest = existingById
-      ? existingById.chatId === destination.chatId && existingById.topicId === destination.topicId
+      ? destinationKey(existingById) === key
         ? existingById
         : null
       : existingForDestination;
@@ -236,16 +278,16 @@ function validateChannels(input) {
     ids.add(id);
 
     if (!Array.isArray(channel.destinations) || channel.destinations.length === 0 || channel.destinations.length > 30) {
-      throw new RequestError("Each channel needs between 1 and 30 Telegram destinations.");
+      throw new RequestError("Each channel needs between 1 and 30 notification destinations.");
     }
 
     const destinationKeys = new Set();
     const destinations = channel.destinations.map((destination) => {
-      const { chatId, topicId } = validateDestination(destination);
-      const key = `${chatId}:${topicId}`;
-      if (destinationKeys.has(key)) throw new RequestError("A Telegram destination is duplicated for this channel.");
+      const validated = validateDestination(destination);
+      const key = destinationKey(validated);
+      if (destinationKeys.has(key)) throw new RequestError("A notification destination is duplicated for this channel.");
       destinationKeys.add(key);
-      return { chatId, topicId };
+      return validated;
     });
 
     const current = config.channels.find((existing) => existing.id === id);
@@ -253,7 +295,7 @@ function validateChannels(input) {
       id,
       destinations: destinations.map((destination) => {
         const previous = current?.destinations.find((item) =>
-          item.chatId === destination.chatId && item.topicId === destination.topicId);
+          destinationKey(item) === destinationKey(destination));
         return {
           ...destination,
           lastVideoId: previous?.lastVideoId || null,
@@ -316,6 +358,61 @@ async function telegramSendPhoto(destination, photo, caption) {
   if (!response.ok || !result.ok) {
     throw new Error(result.description || `Telegram returned HTTP ${response.status}.`);
   }
+}
+
+async function discordSend(destination, payload) {
+  let response;
+  try {
+    response = await fetch(`${destination.webhookUrl}?wait=true`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error("Discord webhook request failed. Check the webhook and network connection.");
+  }
+  if (!response.ok) throw new Error(`Discord returned HTTP ${response.status}.`);
+}
+
+function discordVideoPayload(channel, video) {
+  const publishedAt = video.published && !Number.isNaN(new Date(video.published).getTime())
+    ? new Date(video.published).toISOString()
+    : null;
+  const description = `New upload from **${channel.channelTitle || "YouTube channel"}**` +
+    (publishedAt ? ` · ${new Date(publishedAt).toLocaleString("en-GB", { timeZone: "UTC", timeZoneName: "short" })}` : "");
+  return {
+    embeds: [{
+      title: video.title.slice(0, 256),
+      url: `https://www.youtube.com/watch?v=${encodeURIComponent(video.id)}`,
+      description: description.slice(0, 4096),
+      color: 0xff0000,
+      ...(publishedAt ? { timestamp: publishedAt } : {}),
+      image: { url: `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/hqdefault.jpg` },
+    }],
+    allowed_mentions: { parse: [] },
+  };
+}
+
+async function sendDestination(destination, channel, video) {
+  if (destinationPlatform(destination) === "discord") {
+    await discordSend(destination, discordVideoPayload(channel, video));
+    return;
+  }
+  const caption = formatVideoMessage(config.messageTemplate, channel, video);
+  const thumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/hqdefault.jpg`;
+  await telegramSendPhoto(destination, thumbnail, caption);
+}
+
+async function sendTestDestination(destination) {
+  if (destinationPlatform(destination) === "discord") {
+    await discordSend(destination, {
+      content: "TubeSignal test message — this Discord destination is connected.",
+      allowed_mentions: { parse: [] },
+    });
+    return;
+  }
+  await telegramSend(destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.");
 }
 
 function formatVideoMessage(template, channel, video) {
@@ -411,9 +508,7 @@ async function checkChannel(channel) {
     const newest = entries[0];
     for (const destination of channel.destinations) {
       if (!destination.lastVideoId) {
-        const caption = formatVideoMessage(config.messageTemplate, channel, newest);
-        const thumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(newest.id)}/hqdefault.jpg`;
-        await telegramSendPhoto(destination, thumbnail, caption);
+        await sendDestination(destination, channel, newest);
         destination.lastVideoId = newest.id;
         destination.lastNotifiedAt = new Date().toISOString();
         destination.lastNotifiedVideoTitle = newest.title;
@@ -427,9 +522,7 @@ async function checkChannel(channel) {
       }
 
       for (const entry of unseen.reverse()) {
-        const caption = formatVideoMessage(config.messageTemplate, channel, entry);
-        const thumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(entry.id)}/hqdefault.jpg`;
-        await telegramSendPhoto(destination, thumbnail, caption);
+        await sendDestination(destination, channel, entry);
         destination.lastVideoId = entry.id;
         destination.lastNotifiedAt = new Date().toISOString();
         destination.lastNotifiedVideoTitle = entry.title;
@@ -631,22 +724,22 @@ const server = http.createServer(async (request, response) => {
       const destination = validateDestination(await readJson(request));
       let testError = null;
       try {
-        await telegramSend(destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.");
+        await sendTestDestination(destination);
       } catch (error) {
-        testError = error.message;
+        testError = error instanceof Error ? error.message : String(error);
       }
       const testedAt = new Date().toISOString();
       let saved = false;
       for (const channel of config.channels) {
         const configuredDestination = channel.destinations.find((item) =>
-          item.chatId === destination.chatId && item.topicId === destination.topicId);
+          destinationKey(item) === destinationKey(destination));
         if (!configuredDestination) continue;
         configuredDestination.lastTestAt = testedAt;
         configuredDestination.lastTestError = testError;
         saved = true;
       }
       const savedDestination = config.savedDestinations.find((item) =>
-        item.chatId === destination.chatId && item.topicId === destination.topicId);
+        destinationKey(item) === destinationKey(destination));
       if (savedDestination) {
         savedDestination.lastTestAt = testedAt;
         savedDestination.lastTestError = testError;
@@ -668,7 +761,7 @@ const server = http.createServer(async (request, response) => {
 async function start() {
   await loadConfig();
   server.listen(PORT, HOST, () => {
-    console.log(`YouTube Telegram Notifier is running at http://${HOST}:${PORT}`);
+    console.log(`TubeSignal is running at http://${HOST}:${PORT}`);
     if (!ADMIN_PASSWORD) console.warn("Set ADMIN_PASSWORD before using the dashboard.");
     if (!TELEGRAM_BOT_TOKEN) console.warn("Set TELEGRAM_BOT_TOKEN to send Telegram messages.");
     void checkAllChannels().catch((error) => console.error("Initial YouTube check failed:", error));

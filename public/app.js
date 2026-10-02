@@ -125,10 +125,13 @@ function updateHealth(channels, telegramConfigured) {
   if (failedTests.length > 0) {
     const { channel, destination } = failedTests[0];
     const channelName = channel.channelTitle || channel.id;
-    const topic = destination.topicId ? `, topic ${destination.topicId}` : "";
+    const platform = destination.platform ?? "telegram";
+    const target = platform === "discord"
+      ? destination.name || "Discord webhook"
+      : `${destination.chatId}${destination.topicId ? `, topic ${destination.topicId}` : ""}`;
     setMonitorStatus(
-      "Telegram delivery needs attention",
-      `${channelName} → ${destination.chatId}${topic}: ${destination.lastTestError}`,
+      `${platform === "discord" ? "Discord" : "Telegram"} delivery needs attention`,
+      `${channelName} → ${target}: ${destination.lastTestError}`,
       "error",
     );
     return;
@@ -141,14 +144,16 @@ function updateHealth(channels, telegramConfigured) {
 
   const minutesAgo = Math.max(0, Math.floor((Date.now() - latestCheck.getTime()) / 60_000));
   const recency = minutesAgo === 0 ? "just now" : `${minutesAgo} minute${minutesAgo === 1 ? "" : "s"} ago`;
-  if (!telegramConfigured) {
-    setMonitorStatus("YouTube checks active · Telegram not configured", `Last feed check ${recency}. Add TELEGRAM_BOT_TOKEN to enable delivery.`, "warning");
+  const telegramDestinationsUsed = channels.some((channel) =>
+    channel.destinations.some((destination) => (destination.platform || "telegram") === "telegram"));
+  if (!telegramConfigured && telegramDestinationsUsed) {
+    setMonitorStatus("YouTube checks active · Telegram not configured", `Last feed check ${recency}. Add TELEGRAM_BOT_TOKEN to enable Telegram delivery.`, "warning");
   } else if (minutesAgo > Math.max(pollIntervalMinutes + 2, 5)) {
     setMonitorStatus("Check may be delayed", `Last YouTube feed check was ${recency}. Expected every ${pollIntervalMinutes} minute${pollIntervalMinutes === 1 ? "" : "s"}. Use Check now or verify the server is running.`, "warning");
   } else {
     const verified = channels.reduce((count, channel) =>
       count + channel.destinations.filter((destination) => destination.lastTestAt && !destination.lastTestError).length, 0);
-    const deliveryNote = verified ? ` ${verified} Telegram route${verified === 1 ? "" : "s"} test successfully.` : " Test each Telegram route to verify delivery.";
+    const deliveryNote = verified ? ` ${verified} destination${verified === 1 ? "" : "s"} test successfully.` : " Test each destination to verify delivery.";
     setMonitorStatus("Monitoring active", `Checked ${checkedChannels.length} channel${checkedChannels.length === 1 ? "" : "s"} ${recency}.${deliveryNote}`, verified ? "ready" : "warning");
   }
 }
@@ -184,29 +189,37 @@ function addSavedDestination(destination = {}) {
   row.dataset.lastTestAt = destination.lastTestAt || "";
   row.dataset.lastTestError = destination.lastTestError || "";
   row.querySelector(".saved-name").value = destination.name || "";
+  row.querySelector(".saved-platform").value = destination.platform || "telegram";
   row.querySelector(".saved-chat-id").value = destination.chatId || "";
   row.querySelector(".saved-topic-id").value = destination.topicId || "";
+  row.querySelector(".saved-webhook-url").value = destination.webhookUrl || "";
+  const updatePlatformFields = () => {
+    const isDiscord = row.querySelector(".saved-platform").value === "discord";
+    row.querySelector(".saved-telegram-fields").classList.toggle("hidden", isDiscord);
+    row.querySelector(".saved-discord-fields").classList.toggle("hidden", !isDiscord);
+  };
+  row.querySelector(".saved-platform").addEventListener("change", updatePlatformFields);
+  updatePlatformFields();
   row.querySelector(".test-saved-destination").addEventListener("click", async (event) => {
     const button = event.currentTarget;
-    const chatId = row.querySelector(".saved-chat-id").value.trim();
-    const topicId = row.querySelector(".saved-topic-id").value.trim();
+    const destination = collectSavedDestination(row);
     button.disabled = true;
     row.dataset.lastTestError = "";
     row.querySelector(".saved-destination-status").textContent = "Sending test message…";
     try {
       const result = await api("/api/test", {
         method: "POST",
-        body: JSON.stringify({ chatId, topicId }),
+        body: JSON.stringify(destination),
       });
       row.dataset.lastTestAt = result.testedAt;
       row.dataset.lastTestError = "";
       renderSavedDestinationTestStatus(row);
-      showFeedback("Test message sent to the saved Telegram destination.");
+      showFeedback(`Test message sent to the saved ${destination.platform === "discord" ? "Discord" : "Telegram"} destination.`);
     } catch (error) {
       row.dataset.lastTestAt = new Date().toISOString();
       row.dataset.lastTestError = error.message;
       renderSavedDestinationTestStatus(row);
-      showFeedback(`Telegram test failed: ${error.message}`, true);
+      showFeedback(`${destination.platform === "discord" ? "Discord" : "Telegram"} test failed: ${error.message}`, true);
     } finally {
       button.disabled = false;
     }
@@ -241,7 +254,7 @@ function addSavedDestination(destination = {}) {
   });
   renderSavedDestinationTestStatus(row);
   row.querySelector(".remove-saved-destination").addEventListener("click", () => {
-    const name = row.querySelector(".saved-name").value.trim() || "this Telegram destination";
+    const name = row.querySelector(".saved-name").value.trim() || "this notification destination";
     if (!window.confirm(`Remove ${name} from the saved destinations? This change takes effect when you save destinations.`)) return;
     row.remove();
     updateSavedDestinationCount();
@@ -251,27 +264,42 @@ function addSavedDestination(destination = {}) {
   updateSavedDestinationCount();
 }
 
+function collectSavedDestination(row) {
+  const platform = row.querySelector(".saved-platform").value;
+  return platform === "discord"
+    ? {
+      platform,
+      webhookUrl: row.querySelector(".saved-webhook-url").value.trim(),
+    }
+    : {
+      platform,
+      chatId: row.querySelector(".saved-chat-id").value.trim(),
+      topicId: row.querySelector(".saved-topic-id").value.trim(),
+    };
+}
+
 function collectSavedDestinations() {
   return [...document.querySelectorAll(".saved-destination-row")].map((row) => ({
     id: row.dataset.id,
     name: row.querySelector(".saved-name").value.trim(),
-    chatId: row.querySelector(".saved-chat-id").value.trim(),
-    topicId: row.querySelector(".saved-topic-id").value.trim(),
+    ...collectSavedDestination(row),
     lastTestAt: row.dataset.lastTestAt || null,
     lastTestError: row.dataset.lastTestError || null,
   }));
 }
 
 function destinationKey(destination) {
-  return `${destination.chatId}:${destination.topicId || ""}`;
+  const platform = destination.platform ?? "telegram";
+  return platform === "discord"
+    ? `discord:${destination.webhookUrl}`
+    : `telegram:${destination.chatId}:${destination.topicId || ""}`;
 }
 
 function selectedRouteDestinations(card) {
   return [...card.querySelectorAll(".route-destination-option")]
     .filter((option) => option.querySelector(".route-destination-checkbox").checked)
     .map((option) => ({
-      chatId: option.dataset.chatId,
-      topicId: option.dataset.topicId,
+      ...option.destination,
       lastVideoId: option.dataset.lastVideoId || null,
       lastNotifiedAt: option.dataset.lastNotifiedAt || null,
       lastNotifiedVideoTitle: option.dataset.lastNotifiedVideoTitle || null,
@@ -325,7 +353,12 @@ function refreshRouteDestinations(card, selected = selectedRouteDestinations(car
   for (const destination of selected) {
     const key = destinationKey(destination);
     if (!unique.has(key)) {
-      unique.set(key, { ...destination, name: `Unlisted group ${destination.chatId}` });
+      unique.set(key, {
+        ...destination,
+        name: destination.name || (destination.platform === "discord"
+          ? "Unlisted Discord webhook"
+          : `Unlisted Telegram group ${destination.chatId}`),
+      });
     }
   }
 
@@ -337,8 +370,7 @@ function refreshRouteDestinations(card, selected = selectedRouteDestinations(car
     const key = destinationKey(destination);
     const saved = savedDestinations.find((item) => destinationKey(item) === key);
     const selectedDestination = selectedByKey.get(key);
-    option.dataset.chatId = destination.chatId;
-    option.dataset.topicId = destination.topicId || "";
+    option.destination = destination;
     option.dataset.lastVideoId = selectedDestination?.lastVideoId || "";
     option.dataset.lastNotifiedAt = selectedDestination?.lastNotifiedAt || "";
     option.dataset.lastNotifiedVideoTitle = selectedDestination?.lastNotifiedVideoTitle || "";
@@ -347,13 +379,17 @@ function refreshRouteDestinations(card, selected = selectedRouteDestinations(car
     option.querySelector(".route-destination-checkbox").checked = Boolean(selectedDestination);
 
     const label = option.querySelector(".route-destination-label");
+    const platform = destination.platform ?? "telegram";
+    const destinationLabel = saved?.name || destination.name || (platform === "discord"
+      ? "Discord webhook"
+      : `Telegram group ${destination.chatId}`);
     label.querySelector(".route-destination-name").textContent =
-      `${saved?.name || destination.name || `Telegram group ${destination.chatId}`}${destination.topicId ? ` · Topic ${destination.topicId}` : " · General chat"}`;
+      `${destinationLabel}${platform === "telegram" ? destination.topicId ? ` · Topic ${destination.topicId}` : " · General chat" : " · Discord"}`;
     option.querySelector(".route-destination-checkbox").addEventListener("change", (event) => {
       const selected = card.querySelectorAll(".route-destination-checkbox:checked");
       if (event.currentTarget.checked && selected.length > 30) {
         event.currentTarget.checked = false;
-        showFeedback("A channel can have at most 30 Telegram destinations.", true);
+        showFeedback("A channel can have at most 30 notification destinations.", true);
       }
       updateRouteDestinationCount(card);
     });
@@ -363,17 +399,17 @@ function refreshRouteDestinations(card, selected = selectedRouteDestinations(car
       try {
         await api("/api/test", {
           method: "POST",
-          body: JSON.stringify({ chatId: destination.chatId, topicId: destination.topicId || "" }),
+          body: JSON.stringify(destination),
         });
         option.dataset.lastTestAt = new Date().toISOString();
         option.dataset.lastTestError = "";
         updateRouteDestinationStatus(option);
-        showFeedback("Test message sent to Telegram.");
+        showFeedback(`Test message sent to ${platform === "discord" ? "Discord" : "Telegram"}.`);
       } catch (error) {
         option.dataset.lastTestAt = new Date().toISOString();
         option.dataset.lastTestError = error.message;
         updateRouteDestinationStatus(option);
-        showFeedback(`Telegram test failed: ${error.message}`, true);
+        showFeedback(`${platform === "discord" ? "Discord" : "Telegram"} test failed: ${error.message}`, true);
       } finally {
         button.disabled = false;
       }
@@ -559,7 +595,14 @@ function collectChannels() {
 async function initialize() {
   try {
     const state = await api("/api/session");
-    document.querySelector("#telegram-notice").classList.toggle("hidden", state.telegramConfigured);
+    const telegramDestinations = [
+      ...(state.savedDestinations || []),
+      ...(state.channels || []).flatMap((channel) => channel.destinations || []),
+    ].some((destination) => (destination.platform || "telegram") === "telegram");
+    document.querySelector("#telegram-notice").classList.toggle(
+      "hidden",
+      state.telegramConfigured || !telegramDestinations,
+    );
     showDashboard(state.authenticated);
     if (state.authenticated) {
       renderSavedDestinations(state.savedDestinations || []);
@@ -679,7 +722,7 @@ document.querySelector("#save-destinations").addEventListener("click", async (ev
       body: JSON.stringify({ destinations: collectSavedDestinations() }),
     });
     renderSavedDestinations(result.destinations);
-    showFeedback("Saved Telegram destinations updated.");
+    showFeedback("Saved notification destinations updated.");
   } catch (error) {
     showFeedback(error.message, true);
   } finally {
@@ -701,7 +744,7 @@ document.querySelector("#save-button").addEventListener("click", async (event) =
       channelIds.add(channel.id);
     }
     if (channels.some((channel) => channel.destinations.length === 0)) {
-      throw new Error("Select at least one Telegram group or topic for every notification route.");
+      throw new Error("Select at least one notification destination for every route.");
     }
     const result = await api("/api/channels", {
       method: "PUT",

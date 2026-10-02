@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#111318">
-    <title>TubeSignal — YouTube to Telegram</title>
+    <title>TubeSignal — YouTube notifications</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
@@ -25,7 +25,7 @@
         <div class="hero-copy">
           <p class="eyebrow"><span class="eyebrow-line"></span> YOUR CHANNELS, IN REAL TIME</p>
           <h1>Never miss a<br><span>new upload.</span></h1>
-          <p class="hero-description">Send new YouTube videos straight to your Telegram groups — and exactly the topic you want.</p>
+          <p class="hero-description">Send new YouTube videos straight to your Telegram groups and Discord channels.</p>
         </div>
         <div class="hero-art" aria-hidden="true">
           <div class="orbit orbit-outer"></div>
@@ -61,14 +61,14 @@
           <div>
             <p class="eyebrow">YOUR WORKSPACE</p>
             <h2>Video notifications</h2>
-            <p class="muted">Set up your channels and Telegram groups once. We’ll take care of the rest.</p>
+            <p class="muted">Set up your channels and notification destinations once. We’ll take care of the rest.</p>
           </div>
           <button class="button button-secondary" id="check-button" type="button"><span class="refresh-icon">↻</span> Check now</button>
         </div>
 
         <div class="notice hidden" id="telegram-notice">
           <span class="notice-icon">!</span>
-          <div><strong>Telegram bot token not configured</strong><p>Add <code>TELEGRAM_BOT_TOKEN</code> to your environment and restart the app to send notifications.</p></div>
+          <div><strong>Telegram bot token not configured</strong><p>Add <code>TELEGRAM_BOT_TOKEN</code> to your environment and restart the app to send Telegram notifications.</p></div>
         </div>
 
         <div class="monitor-status" id="monitor-status" role="status" aria-live="polite">
@@ -82,8 +82,8 @@
             <span class="overview-state" id="setup-channel-state">Add</span>
           </a>
           <a class="overview-card" href="#saved-destinations">
-            <span class="overview-icon telegram-icon">✈</span>
-            <span class="overview-copy"><strong>Telegram destinations</strong><small id="setup-destination-count">0 saved</small></span>
+            <span class="overview-icon telegram-icon">↗</span>
+            <span class="overview-copy"><strong>Notification destinations</strong><small id="setup-destination-count">0 saved</small></span>
             <span class="overview-state" id="setup-destination-state">Add</span>
           </a>
           <a class="overview-card" href="#routes">
@@ -126,7 +126,7 @@
 
         <nav class="workflow-nav" aria-label="Dashboard sections">
           <a href="#saved-channels"><span class="nav-step">1</span><span class="nav-label">Add channels</span></a>
-          <a href="#saved-destinations"><span class="nav-step">2</span><span class="nav-label">Add Telegram groups</span></a>
+          <a href="#saved-destinations"><span class="nav-step">2</span><span class="nav-label">Add destinations</span></a>
           <a href="#routes"><span class="nav-step">3</span><span class="nav-label">Connect &amp; save</span></a>
         </nav>
 
@@ -150,15 +150,15 @@
         <details class="workflow-section saved-library" id="saved-destinations">
           <summary class="workflow-section-heading">
             <span class="step-number">02</span>
-            <div><h3>Telegram groups &amp; topics</h3><p>Add each group once. A topic ID is only needed for a specific forum topic.</p></div>
+            <div><h3>Telegram &amp; Discord</h3><p>Add Telegram groups or Discord webhook URLs as destinations.</p></div>
             <span class="saved-count" id="saved-count">0 saved</span>
             <span class="section-chevron" aria-hidden="true">⌄</span>
           </summary>
           <div class="workflow-panel">
             <div class="saved-destination-list" id="saved-destination-list"></div>
-            <button class="button button-small" id="add-saved-destination" type="button">+ Add a Telegram destination</button>
+            <button class="button button-small" id="add-saved-destination" type="button">+ Add a destination</button>
             <div class="saved-save-row">
-              <span class="muted">Fetch details, then test the bot before saving.</span>
+              <span class="muted">Test each destination before saving. Discord webhook URLs are secrets; use a regular text channel.</span>
               <button class="button button-secondary" id="save-destinations" type="button">Save destinations</button>
             </div>
           </div>
@@ -167,7 +167,7 @@
         <details class="workflow-section routes-section" id="routes">
           <summary class="workflow-section-heading">
             <span class="step-number">03</span>
-            <div><h3>Connect channels to groups</h3><p>Choose one YouTube channel per route, then select every Telegram group or topic that should receive its uploads.</p></div>
+            <div><h3>Connect channels to destinations</h3><p>Choose one YouTube channel per route, then select every destination that should receive its uploads.</p></div>
             <span class="saved-count" id="route-section-count">0 routes</span>
             <span class="section-chevron" aria-hidden="true">⌄</span>
           </summary>
@@ -177,7 +177,7 @@
 
             <button class="add-channel" id="add-channel" type="button">
               <span class="add-icon">+</span>
-              <span><strong>Add a route</strong><small>Connect one YouTube channel to one or more Telegram destinations</small></span>
+              <span><strong>Add a route</strong><small>Connect one YouTube channel to one or more destinations</small></span>
               <span class="add-arrow">→</span>
             </button>
 
@@ -190,7 +190,7 @@
         <p class="feedback hidden" id="feedback" role="status"></p>
       </section>
 
-      <footer class="footer"><span>BUILT FOR YOUR COMMUNITY</span><span class="footer-dot">·</span><span>YOUTUBE → TELEGRAM</span><span class="footer-right" id="poll-summary">Checks every 2 minutes</span></footer>
+      <footer class="footer"><span>BUILT FOR YOUR COMMUNITY</span><span class="footer-dot">·</span><span>YOUTUBE → TELEGRAM &amp; DISCORD</span><span class="footer-right" id="poll-summary">Checks every 2 minutes</span></footer>
     </main>
 
     <template id="channel-template">
@@ -212,7 +212,7 @@
         <p class="channel-duplicate-warning hidden" role="status">This channel already has a route. Add destinations to its existing route instead.</p>
         <details class="route-destinations">
           <summary class="destinations-heading">
-            <span class="destinations-copy"><strong>Telegram destinations</strong><span>Check every group or topic that should receive this channel’s uploads.</span></span>
+            <span class="destinations-copy"><strong>Notification destinations</strong><span>Check every Telegram group or Discord channel that should receive this channel’s uploads.</span></span>
             <span class="selected-destination-count">0 selected</span>
             <span class="section-chevron" aria-hidden="true">⌄</span>
           </summary>
@@ -237,9 +237,18 @@
     <template id="saved-destination-template">
       <div class="saved-destination-row">
         <input class="saved-name" type="text" placeholder="Name (e.g. Announcements)" aria-label="Destination name" maxlength="80">
-        <input class="saved-chat-id" type="text" placeholder="Group chat ID" aria-label="Telegram group chat ID" spellcheck="false">
-        <input class="saved-topic-id" type="text" placeholder="Topic ID (optional)" aria-label="Optional Telegram topic ID" inputmode="numeric">
-        <button class="button button-small fetch-telegram-details" type="button">Fetch details</button>
+        <select class="saved-platform" aria-label="Destination platform">
+          <option value="telegram">Telegram</option>
+          <option value="discord">Discord</option>
+        </select>
+        <div class="saved-telegram-fields">
+          <input class="saved-chat-id" type="text" placeholder="Group chat ID" aria-label="Telegram group chat ID" spellcheck="false">
+          <input class="saved-topic-id" type="text" placeholder="Topic ID (optional)" aria-label="Optional Telegram topic ID" inputmode="numeric">
+          <button class="button button-small fetch-telegram-details" type="button">Fetch details</button>
+        </div>
+        <div class="saved-discord-fields hidden">
+          <input class="saved-webhook-url" type="password" placeholder="https://discord.com/api/webhooks/…" aria-label="Discord webhook URL" autocomplete="off" spellcheck="false">
+        </div>
         <button class="button button-small test-saved-destination" type="button">Test</button>
         <button class="icon-button remove-saved-destination" type="button" title="Remove saved destination" aria-label="Remove saved destination">×</button>
         <span class="saved-destination-status" role="status"></span>
