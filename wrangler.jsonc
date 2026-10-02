@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tubesignal",
+  // wrangler.jsonc
+  "name": "youtube-tg-bot",
   "main": "worker.js",
   "compatibility_date": "2026-10-01",
   "assets": {
