@@ -406,17 +406,66 @@ function formatVideoMessage(template, channel, video) {
   return template.replace(/\{(title|channel|published|url|videoId)\}/g, (_, key) => escapeHtml(values[key]));
 }
 
-async function telegramRequest(token, method, payload) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const chatRateLimits = new Map();
+let lastGlobalSendAt = 0;
+
+async function throttleDestination(destKey) {
+  const now = Date.now();
+  const globalElapsed = now - lastGlobalSendAt;
+  if (globalElapsed < 350) {
+    await sleep(350 - globalElapsed);
+  }
+  const lastChatSend = chatRateLimits.get(destKey) || 0;
+  const chatElapsed = Date.now() - lastChatSend;
+  if (chatElapsed < 1200) {
+    await sleep(1200 - chatElapsed);
+  }
+  const sentTime = Date.now();
+  lastGlobalSendAt = sentTime;
+  chatRateLimits.set(destKey, sentTime);
+  if (chatRateLimits.size > 200) {
+    const cutoff = sentTime - 60_000;
+    for (const [k, time] of chatRateLimits) {
+      if (time < cutoff) chatRateLimits.delete(k);
+    }
+  }
+}
+
+async function telegramRequest(token, method, payload, destKey = null) {
   if (!token) throw new RequestError("Set TELEGRAM_BOT_TOKEN in the environment before looking up Telegram chats.");
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const result = await response.json();
-  if (!response.ok || !result.ok) throw new Error(result.description || `Telegram returned HTTP ${response.status}.`);
-  return result.result;
+  const maxRetries = 3;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (destKey) await throttleDestination(destKey);
+    let response;
+    try {
+      response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (networkError) {
+      if (attempt < maxRetries) {
+        await sleep(1500);
+        continue;
+      }
+      throw networkError;
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (response.ok && result.ok) return result.result;
+
+    const is429 = response.status === 429 || result.error_code === 429;
+    if (is429 && attempt < maxRetries) {
+      const retryAfter = Number(result.parameters?.retry_after) || 3;
+      const waitMs = Math.min(Math.max(retryAfter, 1) * 1000 + 500, 30_000);
+      console.warn(`Telegram 429 Too Many Requests on ${method}. Backing off for ${waitMs}ms (attempt ${attempt + 1}/${maxRetries})...`);
+      await sleep(waitMs);
+      continue;
+    }
+    throw new Error(result.description || `Telegram returned HTTP ${response.status}.`);
+  }
 }
 
 async function telegramSend(token, destination, text, disablePreview = false) {
@@ -428,28 +477,48 @@ async function telegramSend(token, destination, text, disablePreview = false) {
     link_preview_options: { is_disabled: Boolean(disablePreview) },
   };
   if (destination.topicId) payload.message_thread_id = Number(destination.topicId);
-  await telegramRequest(token, "sendMessage", payload);
+  await telegramRequest(token, "sendMessage", payload, destinationKey(destination));
 }
 
 async function telegramSendPhoto(token, destination, photo, caption) {
   const payload = { chat_id: destination.chatId, photo, caption, parse_mode: "HTML" };
   if (destination.topicId) payload.message_thread_id = Number(destination.topicId);
-  await telegramRequest(token, "sendPhoto", payload);
+  await telegramRequest(token, "sendPhoto", payload, destinationKey(destination));
 }
 
 async function discordSend(destination, payload) {
-  let response;
-  try {
-    response = await fetch(`${destination.webhookUrl}?wait=true`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15_000),
-    });
-  } catch {
-    throw new Error("Discord webhook request failed. Check the webhook and network connection.");
+  const destKey = destinationKey(destination);
+  const maxRetries = 3;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await throttleDestination(destKey);
+    let response;
+    try {
+      response = await fetch(`${destination.webhookUrl}?wait=true`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch {
+      if (attempt < maxRetries) {
+        await sleep(1500);
+        continue;
+      }
+      throw new Error("Discord webhook request failed. Check the webhook and network connection.");
+    }
+
+    if (response.status === 429 && attempt < maxRetries) {
+      const data = await response.json().catch(() => ({}));
+      const retryAfter = Number(data.retry_after) || 2;
+      const waitMs = Math.min(Math.max(retryAfter, 1) * 1000 + 500, 30_000);
+      console.warn(`Discord 429 Too Many Requests. Retrying in ${waitMs}ms...`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (!response.ok) throw new Error(`Discord returned HTTP ${response.status}.`);
+    return;
   }
-  if (!response.ok) throw new Error(`Discord returned HTTP ${response.status}.`);
 }
 
 function discordVideoPayload(channel, video) {
@@ -550,10 +619,16 @@ async function checkChannel(channel, config, token) {
     const newest = entries[0];
     for (const destination of channel.destinations) {
       if (!destination.lastVideoId) {
-        await sendDestination(token, destination, channel, newest, config);
-        destination.lastVideoId = newest.id;
-        destination.lastNotifiedAt = new Date().toISOString();
-        destination.lastNotifiedVideoTitle = newest.title;
+        try {
+          await sendDestination(token, destination, channel, newest, config);
+          destination.lastVideoId = newest.id;
+          destination.lastNotifiedAt = new Date().toISOString();
+          destination.lastNotifiedVideoTitle = newest.title;
+          destination.lastTestError = null;
+        } catch (error) {
+          destination.lastTestError = error instanceof Error ? error.message : String(error);
+          console.error(JSON.stringify({ message: "Failed to send newest video", destination: destinationKey(destination), error: destination.lastTestError }));
+        }
         continue;
       }
       const unseen = [];
@@ -561,12 +636,23 @@ async function checkChannel(channel, config, token) {
         if (entry.id === destination.lastVideoId) break;
         unseen.push(entry);
       }
-      for (const entry of unseen.reverse()) {
-        await sendDestination(token, destination, channel, entry, config);
-        destination.lastVideoId = entry.id;
-        destination.lastNotifiedAt = new Date().toISOString();
-        destination.lastNotifiedVideoTitle = entry.title;
+      // Anti-spam protection: avoid blasting a huge backlog all in seconds.
+      // Send at most the 3 latest unseen uploads in chronological order.
+      const toSend = unseen.slice(0, 3).reverse();
+      for (const entry of toSend) {
+        try {
+          await sendDestination(token, destination, channel, entry, config);
+          destination.lastVideoId = entry.id;
+          destination.lastNotifiedAt = new Date().toISOString();
+          destination.lastNotifiedVideoTitle = entry.title;
+          destination.lastTestError = null;
+        } catch (error) {
+          destination.lastTestError = error instanceof Error ? error.message : String(error);
+          console.error(JSON.stringify({ message: "Failed to send video to destination", destination: destinationKey(destination), error: destination.lastTestError }));
+          break;
+        }
       }
+      destination.lastVideoId = newest.id;
     }
     channel.lastVideoId = newest.id;
     channel.lastCheckedAt = new Date().toISOString();
@@ -608,7 +694,10 @@ async function withConfigLock(db, callback) {
 
 async function checkAllChannels(db, token) {
   return withConfigLock(db, async (config) => {
-    for (const channel of config.channels) await checkChannel(channel, config, token);
+    for (const channel of config.channels) {
+      await checkChannel(channel, config, token);
+      await sleep(300);
+    }
     return config.channels;
   });
 }
@@ -624,7 +713,10 @@ async function runScheduledCheck(env) {
     if (Number.isFinite(lastCheck) && now - lastCheck < intervalMs) return;
     config.lastScheduledCheckAt = new Date(now).toISOString();
     await saveConfig(env.DB, config);
-    for (const channel of config.channels) await checkChannel(channel, config, env.TELEGRAM_BOT_TOKEN);
+    for (const channel of config.channels) {
+      await checkChannel(channel, config, env.TELEGRAM_BOT_TOKEN);
+      await sleep(300);
+    }
     await saveConfig(env.DB, config);
   } finally {
     await env.DB.prepare("UPDATE app_state SET lock_until = 0 WHERE id = 1").run();
