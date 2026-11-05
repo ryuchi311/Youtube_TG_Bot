@@ -12,6 +12,8 @@ function defaultConfig() {
     savedChannels: [],
     pollIntervalMinutes: 2,
     messageTemplate: DEFAULT_MESSAGE_TEMPLATE,
+    disableThumbnail: false,
+    disableLinkPreview: false,
     lastScheduledCheckAt: null,
   };
 }
@@ -28,6 +30,8 @@ async function loadConfig(db) {
   config.messageTemplate = typeof config.messageTemplate === "string" && config.messageTemplate.trim()
     ? config.messageTemplate
     : DEFAULT_MESSAGE_TEMPLATE;
+  config.disableThumbnail = Boolean(config.disableThumbnail);
+  config.disableLinkPreview = Boolean(config.disableLinkPreview);
   if (!Array.isArray(config.savedChannels)) {
     config.savedChannels = config.channels.map((channel) => ({
       id: crypto.randomUUID(),
@@ -219,7 +223,13 @@ function validateDestination(destination) {
   if (topicId && !/^[1-9]\d*$/.test(topicId)) {
     throw new RequestError("Topic IDs must be positive numbers, or left blank.");
   }
-  return { platform, chatId, topicId };
+  return {
+    platform,
+    chatId,
+    topicId,
+    ...(typeof destination.disableThumbnail === "boolean" ? { disableThumbnail: destination.disableThumbnail } : {}),
+    ...(typeof destination.disableLinkPreview === "boolean" ? { disableLinkPreview: destination.disableLinkPreview } : {}),
+  };
 }
 
 function latestRouteTestForDestination(config, destination) {
@@ -409,8 +419,14 @@ async function telegramRequest(token, method, payload) {
   return result.result;
 }
 
-async function telegramSend(token, destination, text) {
-  const payload = { chat_id: destination.chatId, text, parse_mode: "HTML", disable_web_page_preview: false };
+async function telegramSend(token, destination, text, disablePreview = false) {
+  const payload = {
+    chat_id: destination.chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: Boolean(disablePreview),
+    link_preview_options: { is_disabled: Boolean(disablePreview) },
+  };
   if (destination.topicId) payload.message_thread_id = Number(destination.topicId);
   await telegramRequest(token, "sendMessage", payload);
 }
@@ -455,17 +471,37 @@ function discordVideoPayload(channel, video) {
   };
 }
 
-async function sendDestination(token, destination, channel, video, messageTemplate) {
+async function sendDestination(token, destination, channel, video, config) {
   if (destinationPlatform(destination) === "discord") {
     await discordSend(destination, discordVideoPayload(channel, video));
     return;
   }
-  const caption = formatVideoMessage(messageTemplate, channel, video);
+  const caption = formatVideoMessage(config.messageTemplate, channel, video);
+  const saved = config.savedDestinations?.find((item) => destinationKey(item) === destinationKey(destination));
+  const shouldDisableThumbnail = typeof destination.disableThumbnail === "boolean"
+    ? destination.disableThumbnail
+    : typeof saved?.disableThumbnail === "boolean"
+      ? saved.disableThumbnail
+      : Boolean(config.disableThumbnail);
+  const shouldDisableLinkPreview = typeof destination.disableLinkPreview === "boolean"
+    ? destination.disableLinkPreview
+    : typeof saved?.disableLinkPreview === "boolean"
+      ? saved.disableLinkPreview
+      : Boolean(config.disableLinkPreview);
+
+  if (shouldDisableThumbnail) {
+    await telegramSend(token, destination, caption, shouldDisableLinkPreview);
+    return;
+  }
   const thumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/hqdefault.jpg`;
-  await telegramSendPhoto(token, destination, thumbnail, caption);
+  try {
+    await telegramSendPhoto(token, destination, thumbnail, caption);
+  } catch (error) {
+    await telegramSend(token, destination, caption, shouldDisableLinkPreview);
+  }
 }
 
-async function sendTestDestination(token, destination) {
+async function sendTestDestination(token, destination, config = {}) {
   if (destinationPlatform(destination) === "discord") {
     await discordSend(destination, {
       content: "TubeSignal test message — this Discord destination is connected.",
@@ -473,7 +509,28 @@ async function sendTestDestination(token, destination) {
     });
     return;
   }
-  await telegramSend(token, destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.");
+  const saved = config.savedDestinations?.find((item) => destinationKey(item) === destinationKey(destination));
+  const shouldDisableThumbnail = typeof destination.disableThumbnail === "boolean"
+    ? destination.disableThumbnail
+    : typeof saved?.disableThumbnail === "boolean"
+      ? saved.disableThumbnail
+      : Boolean(config.disableThumbnail);
+  const shouldDisableLinkPreview = typeof destination.disableLinkPreview === "boolean"
+    ? destination.disableLinkPreview
+    : typeof saved?.disableLinkPreview === "boolean"
+      ? saved.disableLinkPreview
+      : Boolean(config.disableLinkPreview);
+
+  if (shouldDisableThumbnail) {
+    await telegramSend(token, destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.", shouldDisableLinkPreview);
+  } else {
+    const testThumbnail = "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg";
+    try {
+      await telegramSendPhoto(token, destination, testThumbnail, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.");
+    } catch {
+      await telegramSend(token, destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.", shouldDisableLinkPreview);
+    }
+  }
 }
 
 async function checkChannel(channel, config, token) {
@@ -493,7 +550,7 @@ async function checkChannel(channel, config, token) {
     const newest = entries[0];
     for (const destination of channel.destinations) {
       if (!destination.lastVideoId) {
-        await sendDestination(token, destination, channel, newest, config.messageTemplate);
+        await sendDestination(token, destination, channel, newest, config);
         destination.lastVideoId = newest.id;
         destination.lastNotifiedAt = new Date().toISOString();
         destination.lastNotifiedVideoTitle = newest.title;
@@ -505,7 +562,7 @@ async function checkChannel(channel, config, token) {
         unseen.push(entry);
       }
       for (const entry of unseen.reverse()) {
-        await sendDestination(token, destination, channel, entry, config.messageTemplate);
+        await sendDestination(token, destination, channel, entry, config);
         destination.lastVideoId = entry.id;
         destination.lastNotifiedAt = new Date().toISOString();
         destination.lastNotifiedVideoTitle = entry.title;
@@ -623,6 +680,8 @@ async function handleApi(request, env, ctx) {
         savedChannels: config?.savedChannels,
         pollIntervalMinutes: config?.pollIntervalMinutes,
         messageTemplate: config?.messageTemplate,
+        disableThumbnail: Boolean(config?.disableThumbnail),
+        disableLinkPreview: Boolean(config?.disableLinkPreview),
       });
     }
 
@@ -642,11 +701,22 @@ async function handleApi(request, env, ctx) {
         }
         config.pollIntervalMinutes = body.pollIntervalMinutes;
         config.messageTemplate = template;
+        if (typeof body.disableThumbnail === "boolean") {
+          config.disableThumbnail = body.disableThumbnail;
+        }
+        if (typeof body.disableLinkPreview === "boolean") {
+          config.disableLinkPreview = body.disableLinkPreview;
+        }
       });
       ctx.waitUntil(checkAllChannels(env.DB, env.TELEGRAM_BOT_TOKEN).catch((error) =>
         console.error(JSON.stringify({ message: "Check after settings update failed", error: String(error) }))));
       const config = await loadConfig(env.DB);
-      return json(200, { pollIntervalMinutes: config.pollIntervalMinutes, messageTemplate: config.messageTemplate });
+      return json(200, {
+        pollIntervalMinutes: config.pollIntervalMinutes,
+        messageTemplate: config.messageTemplate,
+        disableThumbnail: Boolean(config.disableThumbnail),
+        disableLinkPreview: Boolean(config.disableLinkPreview),
+      });
     }
 
     if (request.method === "PUT" && url.pathname === "/api/channels") {
@@ -712,7 +782,8 @@ async function handleApi(request, env, ctx) {
       const testedAt = new Date().toISOString();
       let testError = null;
       try {
-        await sendTestDestination(env.TELEGRAM_BOT_TOKEN, destination);
+        const currentConfig = await loadConfig(env.DB);
+        await sendTestDestination(env.TELEGRAM_BOT_TOKEN, destination, currentConfig);
       } catch (error) {
         testError = error instanceof Error ? error.message : String(error);
       }

@@ -48,6 +48,13 @@ function renderMessageTemplate(template) {
   document.querySelector("#message-template").value = template || DEFAULT_MESSAGE_TEMPLATE;
 }
 
+function renderTelegramOptions(disableThumbnail, disableLinkPreview) {
+  const thumb = document.querySelector("#disable-thumbnail");
+  const preview = document.querySelector("#disable-link-preview");
+  if (thumb) thumb.checked = Boolean(disableThumbnail);
+  if (preview) preview.checked = Boolean(disableLinkPreview);
+}
+
 function setMonitorStatus(title, detail, state = "ready") {
   const status = document.querySelector("#monitor-status");
   status.classList.toggle("is-error", state === "error");
@@ -231,10 +238,15 @@ function addSavedDestination(destination = {}) {
   row.querySelector(".saved-chat-id").value = destination.chatId || "";
   row.querySelector(".saved-topic-id").value = destination.topicId || "";
   row.querySelector(".saved-webhook-url").value = destination.webhookUrl || "";
+  const thumbInput = row.querySelector(".saved-disable-thumbnail");
+  if (thumbInput) thumbInput.checked = Boolean(destination.disableThumbnail);
+  const previewInput = row.querySelector(".saved-disable-link-preview");
+  if (previewInput) previewInput.checked = Boolean(destination.disableLinkPreview);
   const updatePlatformFields = () => {
     const isDiscord = row.querySelector(".saved-platform").value === "discord";
     row.querySelector(".saved-telegram-fields").classList.toggle("hidden", isDiscord);
     row.querySelector(".saved-discord-fields").classList.toggle("hidden", !isDiscord);
+    row.querySelector(".saved-telegram-options").classList.toggle("hidden", isDiscord);
   };
   row.querySelector(".saved-platform").addEventListener("change", updatePlatformFields);
   updatePlatformFields();
@@ -313,6 +325,8 @@ function collectSavedDestination(row) {
       platform,
       chatId: row.querySelector(".saved-chat-id").value.trim(),
       topicId: row.querySelector(".saved-topic-id").value.trim(),
+      disableThumbnail: Boolean(row.querySelector(".saved-disable-thumbnail")?.checked),
+      disableLinkPreview: Boolean(row.querySelector(".saved-disable-link-preview")?.checked),
     };
 }
 
@@ -336,14 +350,31 @@ function destinationKey(destination) {
 function selectedRouteDestinations(card) {
   return [...card.querySelectorAll(".route-destination-option")]
     .filter((option) => option.querySelector(".route-destination-checkbox").checked)
-    .map((option) => ({
-      ...option.destination,
-      lastVideoId: option.dataset.lastVideoId || null,
-      lastNotifiedAt: option.dataset.lastNotifiedAt || null,
-      lastNotifiedVideoTitle: option.dataset.lastNotifiedVideoTitle || null,
-      lastTestAt: option.dataset.lastTestAt || null,
-      lastTestError: option.dataset.lastTestError || null,
-    }));
+    .map((option) => {
+      const base = option.destination;
+      const key = destinationKey(base);
+      const saved = savedDestinations.find((item) => destinationKey(item) === key);
+      const disableThumbnail = typeof base?.disableThumbnail === "boolean"
+        ? base.disableThumbnail
+        : typeof saved?.disableThumbnail === "boolean"
+          ? saved.disableThumbnail
+          : false;
+      const disableLinkPreview = typeof base?.disableLinkPreview === "boolean"
+        ? base.disableLinkPreview
+        : typeof saved?.disableLinkPreview === "boolean"
+          ? saved.disableLinkPreview
+          : false;
+      return {
+        ...base,
+        disableThumbnail,
+        disableLinkPreview,
+        lastVideoId: option.dataset.lastVideoId || null,
+        lastNotifiedAt: option.dataset.lastNotifiedAt || null,
+        lastNotifiedVideoTitle: option.dataset.lastNotifiedVideoTitle || null,
+        lastTestAt: option.dataset.lastTestAt || null,
+        lastTestError: option.dataset.lastTestError || null,
+      };
+    });
 }
 
 function updateRouteDestinationCount(card) {
@@ -421,8 +452,21 @@ function refreshRouteDestinations(card, selected = selectedRouteDestinations(car
     const destinationLabel = saved?.name || destination.name || (platform === "discord"
       ? "Discord webhook"
       : `Telegram group ${destination.chatId}`);
-    label.querySelector(".route-destination-name").textContent =
-      `${destinationLabel}${platform === "telegram" ? destination.topicId ? ` · Topic ${destination.topicId}` : " · General chat" : " · Discord"}`;
+    let extra = "";
+    if (platform === "telegram") {
+      extra = destination.topicId ? ` · Topic ${destination.topicId}` : " · General chat";
+      const isThumbDisabled = typeof destination.disableThumbnail === "boolean"
+        ? destination.disableThumbnail
+        : saved?.disableThumbnail;
+      const isPreviewDisabled = typeof destination.disableLinkPreview === "boolean"
+        ? destination.disableLinkPreview
+        : saved?.disableLinkPreview;
+      if (isThumbDisabled) extra += " · No thumbnail";
+      if (isPreviewDisabled) extra += " · No preview";
+    } else {
+      extra = " · Discord";
+    }
+    label.querySelector(".route-destination-name").textContent = `${destinationLabel}${extra}`;
     option.querySelector(".route-destination-checkbox").addEventListener("change", (event) => {
       const selected = card.querySelectorAll(".route-destination-checkbox:checked");
       if (event.currentTarget.checked && selected.length > 30) {
@@ -435,9 +479,18 @@ function refreshRouteDestinations(card, selected = selectedRouteDestinations(car
       const button = event.currentTarget;
       button.disabled = true;
       try {
+        const testPayload = {
+          ...destination,
+          disableThumbnail: typeof destination.disableThumbnail === "boolean"
+            ? destination.disableThumbnail
+            : saved?.disableThumbnail,
+          disableLinkPreview: typeof destination.disableLinkPreview === "boolean"
+            ? destination.disableLinkPreview
+            : saved?.disableLinkPreview,
+        };
         await api("/api/test", {
           method: "POST",
-          body: JSON.stringify(destination),
+          body: JSON.stringify(testPayload),
         });
         option.dataset.lastTestAt = new Date().toISOString();
         option.dataset.lastTestError = "";
@@ -648,6 +701,7 @@ async function initialize() {
       renderChannels(state.channels || []);
       renderPollInterval(state.pollIntervalMinutes || 2);
       renderMessageTemplate(state.messageTemplate);
+      renderTelegramOptions(state.disableThumbnail, state.disableLinkPreview);
       updateHealth(state.channels || [], state.telegramConfigured);
     }
   } catch (error) {
@@ -714,11 +768,14 @@ document.querySelector("#save-settings").addEventListener("click", async (event)
       body: JSON.stringify({
         pollIntervalMinutes: Number(document.querySelector("#poll-interval").value),
         messageTemplate: document.querySelector("#message-template").value,
+        disableThumbnail: document.querySelector("#disable-thumbnail").checked,
+        disableLinkPreview: document.querySelector("#disable-link-preview").checked,
       }),
     });
     renderPollInterval(result.pollIntervalMinutes);
     renderMessageTemplate(result.messageTemplate);
-    showFeedback(`Check interval and Telegram template saved. Checks run every ${result.pollIntervalMinutes} minute${result.pollIntervalMinutes === 1 ? "" : "s"}.`);
+    renderTelegramOptions(result.disableThumbnail, result.disableLinkPreview);
+    showFeedback(`Settings saved. Checks run every ${result.pollIntervalMinutes} minute${result.pollIntervalMinutes === 1 ? "" : "s"}.`);
   } catch (error) {
     showFeedback(error.message, true);
   } finally {
@@ -732,6 +789,7 @@ document.querySelector("#save-template").addEventListener("click", async () => {
 
 document.querySelector("#reset-template").addEventListener("click", () => {
   renderMessageTemplate(DEFAULT_MESSAGE_TEMPLATE);
+  renderTelegramOptions(false, false);
 });
 
 document.querySelector("#save-channels").addEventListener("click", async (event) => {

@@ -114,7 +114,18 @@
               <div class="template-settings-content">
                 <label class="field-label" for="message-template">Message template</label>
                 <textarea id="message-template" rows="6" maxlength="900" spellcheck="false"></textarea>
-                <p class="template-help">Supports Telegram HTML and {title}, {channel}, {published}, {url}, {videoId}. Use your own group links or hashtags as plain text. New uploads are sent with the video thumbnail.</p>
+                <p class="template-help">Supports Telegram HTML and {title}, {channel}, {published}, {url}, {videoId}. Use your own group links or hashtags as plain text. New uploads include the video thumbnail by default.</p>
+                <div class="template-options">
+                  <span class="field-caption" style="margin-bottom: 2px;">Default options (applies to groups unless set individually):</span>
+                  <label class="checkbox-setting">
+                    <input type="checkbox" id="disable-thumbnail">
+                    <span>Disable video thumbnail (default for all groups)</span>
+                  </label>
+                  <label class="checkbox-setting">
+                    <input type="checkbox" id="disable-link-preview">
+                    <span>Disable link preview (default for all groups)</span>
+                  </label>
+                </div>
                 <div class="template-actions">
                   <button class="button button-small" id="reset-template" type="button">Use default</button>
                   <button class="button button-secondary" id="save-template" type="button">Save message</button>
@@ -252,6 +263,16 @@
         </div>
         <button class="button button-small test-saved-destination" type="button">Test</button>
         <button class="icon-button remove-saved-destination" type="button" title="Remove saved destination" aria-label="Remove saved destination">×</button>
+        <div class="saved-telegram-options">
+          <label class="destination-checkbox-label">
+            <input class="saved-disable-thumbnail" type="checkbox">
+            <span>Disable thumbnail for this group</span>
+          </label>
+          <label class="destination-checkbox-label">
+            <input class="saved-disable-link-preview" type="checkbox">
+            <span>Disable link preview</span>
+          </label>
+        </div>
         <span class="saved-destination-status" role="status"></span>
       </div>
     </template>

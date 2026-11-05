@@ -21,6 +21,8 @@ let config = {
   savedChannels: [],
   pollIntervalMinutes: 2,
   messageTemplate: DEFAULT_MESSAGE_TEMPLATE,
+  disableThumbnail: false,
+  disableLinkPreview: false,
 };
 let polling = false;
 let pollTimer = null;
@@ -39,6 +41,8 @@ async function loadConfig() {
     config.messageTemplate = typeof saved.messageTemplate === "string" && saved.messageTemplate.trim()
       ? saved.messageTemplate
       : DEFAULT_MESSAGE_TEMPLATE;
+    config.disableThumbnail = Boolean(saved.disableThumbnail);
+    config.disableLinkPreview = Boolean(saved.disableLinkPreview);
     const hasSavedChannels = Array.isArray(saved.savedChannels);
     config.savedChannels = hasSavedChannels ? saved.savedChannels : config.channels.map((channel) => ({
         id: crypto.randomUUID(),
@@ -172,7 +176,13 @@ function validateDestination(destination) {
   if (topicId && !/^[1-9]\d*$/.test(topicId)) {
     throw new RequestError("Topic IDs must be positive numbers, or left blank.");
   }
-  return { platform, chatId, topicId };
+  return {
+    platform,
+    chatId,
+    topicId,
+    ...(typeof destination.disableThumbnail === "boolean" ? { disableThumbnail: destination.disableThumbnail } : {}),
+    ...(typeof destination.disableLinkPreview === "boolean" ? { disableLinkPreview: destination.disableLinkPreview } : {}),
+  };
 }
 
 function latestRouteTestForDestination(destination) {
@@ -316,13 +326,14 @@ function validateChannels(input) {
   });
 }
 
-async function telegramSend(destination, text) {
+async function telegramSend(destination, text, disablePreview = false) {
   if (!TELEGRAM_BOT_TOKEN) throw new Error("Set TELEGRAM_BOT_TOKEN in the environment first.");
   const payload = {
     chat_id: destination.chatId,
     text,
     parse_mode: "HTML",
-    disable_web_page_preview: false,
+    disable_web_page_preview: Boolean(disablePreview),
+    link_preview_options: { is_disabled: Boolean(disablePreview) },
   };
   if (destination.topicId) payload.message_thread_id = Number(destination.topicId);
 
@@ -400,8 +411,28 @@ async function sendDestination(destination, channel, video) {
     return;
   }
   const caption = formatVideoMessage(config.messageTemplate, channel, video);
+  const saved = config.savedDestinations?.find((item) => destinationKey(item) === destinationKey(destination));
+  const shouldDisableThumbnail = typeof destination.disableThumbnail === "boolean"
+    ? destination.disableThumbnail
+    : typeof saved?.disableThumbnail === "boolean"
+      ? saved.disableThumbnail
+      : Boolean(config.disableThumbnail);
+  const shouldDisableLinkPreview = typeof destination.disableLinkPreview === "boolean"
+    ? destination.disableLinkPreview
+    : typeof saved?.disableLinkPreview === "boolean"
+      ? saved.disableLinkPreview
+      : Boolean(config.disableLinkPreview);
+
+  if (shouldDisableThumbnail) {
+    await telegramSend(destination, caption, shouldDisableLinkPreview);
+    return;
+  }
   const thumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/hqdefault.jpg`;
-  await telegramSendPhoto(destination, thumbnail, caption);
+  try {
+    await telegramSendPhoto(destination, thumbnail, caption);
+  } catch (error) {
+    await telegramSend(destination, caption, shouldDisableLinkPreview);
+  }
 }
 
 async function sendTestDestination(destination) {
@@ -412,7 +443,28 @@ async function sendTestDestination(destination) {
     });
     return;
   }
-  await telegramSend(destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.");
+  const saved = config.savedDestinations?.find((item) => destinationKey(item) === destinationKey(destination));
+  const shouldDisableThumbnail = typeof destination.disableThumbnail === "boolean"
+    ? destination.disableThumbnail
+    : typeof saved?.disableThumbnail === "boolean"
+      ? saved.disableThumbnail
+      : Boolean(config.disableThumbnail);
+  const shouldDisableLinkPreview = typeof destination.disableLinkPreview === "boolean"
+    ? destination.disableLinkPreview
+    : typeof saved?.disableLinkPreview === "boolean"
+      ? saved.disableLinkPreview
+      : Boolean(config.disableLinkPreview);
+
+  if (shouldDisableThumbnail) {
+    await telegramSend(destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.", shouldDisableLinkPreview);
+  } else {
+    const testThumbnail = "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg";
+    try {
+      await telegramSendPhoto(destination, testThumbnail, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.");
+    } catch {
+      await telegramSend(destination, "<b>YouTube notifier test</b>\nThis Telegram destination is connected.", shouldDisableLinkPreview);
+    }
+  }
 }
 
 function formatVideoMessage(template, channel, video) {
@@ -623,6 +675,8 @@ const server = http.createServer(async (request, response) => {
         savedChannels: isAuthenticated(request) ? config.savedChannels : undefined,
         pollIntervalMinutes: isAuthenticated(request) ? config.pollIntervalMinutes : undefined,
         messageTemplate: isAuthenticated(request) ? config.messageTemplate : undefined,
+        disableThumbnail: isAuthenticated(request) ? Boolean(config.disableThumbnail) : undefined,
+        disableLinkPreview: isAuthenticated(request) ? Boolean(config.disableLinkPreview) : undefined,
       });
     }
 
@@ -646,12 +700,20 @@ const server = http.createServer(async (request, response) => {
       }
       config.pollIntervalMinutes = body.pollIntervalMinutes;
       config.messageTemplate = messageTemplate;
+      if (typeof body.disableThumbnail === "boolean") {
+        config.disableThumbnail = body.disableThumbnail;
+      }
+      if (typeof body.disableLinkPreview === "boolean") {
+        config.disableLinkPreview = body.disableLinkPreview;
+      }
       await saveConfig();
       scheduleChannelChecks();
       void checkAllChannels().catch((error) => console.error("YouTube check after settings update failed:", error));
       return sendJson(response, 200, {
         pollIntervalMinutes: config.pollIntervalMinutes,
         messageTemplate: config.messageTemplate,
+        disableThumbnail: Boolean(config.disableThumbnail),
+        disableLinkPreview: Boolean(config.disableLinkPreview),
       });
     }
 
